@@ -163,6 +163,8 @@
     .signin-shell > p { margin: 0 0 22px; color: var(--muted); font-size: 11px; }
     .signin-shell .field + .field { margin-top: 13px; }
     .signin-shell .button { width: 100%; margin-top: 20px; }
+    .google-button { display: flex; width: 100%; align-items: center; justify-content: center; gap: 11px; margin-top: 20px; }
+    .google-mark { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: #4285f4; background: #fff; font: 700 13px Arial, sans-serif; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .field { display: flex; flex-direction: column; gap: 6px; }
     .field.full { grid-column: 1/-1; }
@@ -287,7 +289,8 @@
       try { data = JSON.parse(localStorage.getItem(STORAGE_KEY)) || initial(); } catch { data = initial(); }
       if (!data.products) data = initial();
       data = { ...initial(), ...data };
-      let view = 'home';
+      const initialQuery = new URLSearchParams(window.location.search);
+      let view = initialQuery.has('auth') || initialQuery.has('auth_error') ? 'signin' : 'home';
       let categoryFilter = 'All';
       let searchTerm = '';
       let selectedSku = null;
@@ -296,11 +299,29 @@
       let adminTab = 'products';
       let editingSku = null;
       let toastTimer;
+      let authenticatedCustomer = null;
+      let authLoading = true;
+      let authServiceAvailable = true;
       const app = document.querySelector('#app');
       const money = amount => new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(amount || 0);
       const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
       const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      const customerSession = () => { try { return JSON.parse(localStorage.getItem('xcel-customer-session') || 'null'); } catch { return null; } };
+      const customerSession = () => authenticatedCustomer;
+      const refreshCustomerSession = async () => {
+        try {
+          const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
+          if (!response.ok) throw new Error('Session service unavailable');
+          const result = await response.json();
+          authenticatedCustomer = result.customer || null;
+          authServiceAvailable = true;
+        } catch {
+          authenticatedCustomer = null;
+          authServiceAvailable = false;
+        } finally {
+          authLoading = false;
+          render();
+        }
+      };
       const activeProducts = () => data.products.filter(product => product.active !== false);
       const findProduct = sku => data.products.find(product => product.sku === sku);
       const stockState = stock => stock < 1 ? 'Out of Stock' : stock <= 4 ? 'Low Stock' : 'In Stock';
@@ -344,7 +365,10 @@
       const checkoutPage = () => `<main class="wrap page-shell"><div class="breadcrumb">Your details · No online payment</div><h1 class="page-title">Complete your order</h1>${!data.cart.length ? '<div class="empty-state">Your bag is empty. <button class="text-button" data-view="catalog">Browse the collection</button></div>' : `<div class="checkout-layout"><form id="checkout-form"><h2 style="font:500 21px var(--serif);margin:0 0 16px">Contact and delivery</h2><div class="form-grid"><div class="field"><label for="customer-name">Full name</label><input id="customer-name" name="name" required autocomplete="name"></div><div class="field"><label for="customer-email">Email address</label><input id="customer-email" name="email" type="email" required autocomplete="email"></div><div class="field"><label for="customer-phone">Phone number</label><input id="customer-phone" name="phone" type="tel" required autocomplete="tel"></div><div class="field"><label for="customer-city">City</label><input id="customer-city" name="city" required autocomplete="address-level2"></div><div class="field full"><label for="customer-address">Delivery address</label><textarea id="customer-address" name="address" required autocomplete="street-address"></textarea></div></div><div class="notice">No payment is collected on this website. After your order request, our team will contact you to confirm payment and delivery arrangements.</div><button class="button button-gold" type="submit">Place order request · ${money(cartTotal())}</button></form><aside class="summary"><h2>Your order</h2>${data.cart.map(item => { const product = findProduct(item.sku); return product ? `<div class="summary-row"><span>${escapeHtml(product.name)} × ${item.quantity}</span><strong>${money(item.unitPrice * item.quantity)}</strong></div>` : ''; }).join('')}<div class="summary-row summary-total"><strong>Total</strong><strong>${money(cartTotal())}</strong></div></aside></div>`}</main>`;
       const signinPage = () => {
         const session = customerSession();
-        return `<main class="wrap page-shell"><section class="signin-shell">${session ? `<div class="eyebrow">Customer account</div><h1>Welcome back.</h1><p>Signed in on this browser as <strong>${escapeHtml(session.email)}</strong>.</p><button class="button button-outline" data-action="signout">Sign out</button>` : `<div class="eyebrow">Customer account</div><h1>Welcome back.</h1><p>Sign in to keep your shopping experience close at hand.</p><form id="signin-form"><div class="field"><label for="signin-email">Email address</label><input id="signin-email" name="email" type="email" required autocomplete="email"></div><div class="field"><label for="signin-password">Password</label><input id="signin-password" name="password" type="password" required autocomplete="current-password"></div><div class="notice">This preview keeps a sign-in session on this browser only. Secure account verification will need a connected authentication service.</div><button class="button button-gold" type="submit">Sign in</button></form>`}</section></main>`;
+        const authError = new URLSearchParams(window.location.search).has('auth_error');
+        return `<main class="wrap page-shell"><section class="signin-shell">
+          ${session ? `<div class="eyebrow">Customer account</div><h1>Welcome back.</h1><p>Signed in with Google as <strong>${escapeHtml(session.name || session.email)}</strong><br>${escapeHtml(session.email)}</p><button class="button button-outline" data-action="signout">Sign out</button>` : `<div class="eyebrow">Customer account</div><h1>Welcome back.</h1><p>Sign in securely with your Google Account.</p>${authError ? '<div class="notice">Google sign-in could not be completed. Please try again.</div>' : ''}${authLoading ? '<div class="notice">Checking sign-in service…</div>' : authServiceAvailable ? '<a class="button button-gold google-button" href="/auth/google"><span class="google-mark" aria-hidden="true">G</span>Continue with Google</a>' : '<div class="notice">Google sign-in needs the local server. Start the site with <code>node server.js</code> and open <code>http://localhost:8000</code>.</div>'}`}
+        </section></main>`;
       };
       const adminStats = () => {
         const products = activeProducts();
@@ -401,7 +425,7 @@
         const sku = action.dataset.sku;
         switch (action.dataset.action) {
           case 'theme': localStorage.setItem('xcel-theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); render(); break;
-          case 'signout': localStorage.removeItem('xcel-customer-session'); render(); toast('You have signed out.'); break;
+          case 'signout': fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(refreshCustomerSession).then(() => toast('You have signed out.')).catch(() => toast('Could not sign out. Please try again.')); break;
           case 'detail-qty': { const product = findProduct(selectedSku); detailQuantity = Math.max(1, Math.min(product.stock, detailQuantity + Number(action.dataset.delta))); render(); break; }
           case 'detail-add': addToCart(selectedSku, detailQuantity); break;
           case 'make-offer': modal = 'offer'; render(); break;
@@ -426,12 +450,6 @@
         if (event.target.id === 'product-category') document.querySelector('#custom-category-field').hidden = event.target.value !== '__custom';
       });
       document.addEventListener('submit', event => {
-        if (event.target.id === 'signin-form') {
-          event.preventDefault();
-          const email = String(new FormData(event.target).get('email')).trim().toLowerCase();
-          localStorage.setItem('xcel-customer-session', JSON.stringify({ email, signedInAt: new Date().toISOString() }));
-          go('signin'); toast('You are signed in on this browser.');
-        }
         if (event.target.id === 'offer-form') {
           event.preventDefault();
           const product = findProduct(event.target.dataset.sku); const form = new FormData(event.target);
@@ -466,6 +484,7 @@
         if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.product-card')) { event.preventDefault(); selectedSku = event.target.dataset.product; detailQuantity = 1; go('detail'); }
       });
       render();
+      refreshCustomerSession();
     })();
   </script>
 </body>

@@ -1,0 +1,11 @@
+{
+  "name": "xcel-international-storefront",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "db:check": "node server.js --check-db"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}
